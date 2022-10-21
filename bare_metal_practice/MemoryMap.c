@@ -13,7 +13,7 @@ struct MemoryMap {
     UINTN map_size;
     UINTN map_key;
     UINTN descriptor_size;
-    UINTN descriptor_version;
+    UINT32 descriptor_version;
 };
 
 EFI_STATUS GetMemoryMap(struct MemoryMap *map) {
@@ -32,7 +32,7 @@ EFI_STATUS GetMemoryMap(struct MemoryMap *map) {
     );
 }
 
-EFI_STATUS CHAR16* GetMemoryTypeUnicode(EFI_MEMORY_TYPE type) {
+const CHAR16* GetMemoryTypeUnicode(EFI_MEMORY_TYPE type) {
     switch (type) {
         case EfiReservedMemoryType: return L"EfiReservedMemoryType";
         case EfiLoaderCode: return L"EfiLoaderCode";
@@ -62,7 +62,7 @@ EFI_STATUS SaveMemoryMap(struct MemoryMap *map, EFI_FILE_PROTOCOL *file) {
     len = AsciiStrLen(header);
     file->Write(file, &len, header);
 
-    Print(L"map->buffer = %08lx, map->map_size = %08l\n", map->buffer, map->map_size);
+    Print(L"map->buffer = %08lx, map->map_size = %08lx\n", map->buffer, map->map_size);
 
     EFI_PHYSICAL_ADDRESS iter;
     int i;
@@ -72,20 +72,21 @@ EFI_STATUS SaveMemoryMap(struct MemoryMap *map, EFI_FILE_PROTOCOL *file) {
             iter += map->descriptor_size, i++
         ) {
         EFI_MEMORY_DESCRIPTOR* desc = (EFI_MEMORY_DESCRIPTOR*)iter;
-        len = AsciiPrint (
+        len = AsciiSPrint (
                 buf, sizeof(buf),
                 "%u, %x, %-ls, %08lx, %lx, %lx\n",
                 i, desc->Type, GetMemoryTypeUnicode(desc->Type),
-                desc->PhysocalStart, desc->NumberOfPages,
+                desc->PhysicalStart, desc->NumberOfPages,
                 desc->Attribute & 0xffffflu
         );
 
         file->Write(file, &len, buf);
-        return EFI_SUCCESS;
     }
+
+    return EFI_SUCCESS;
 }
 
-EFI_STATUS OpenRootDir(EFI_HANDLE image_handle, EDI_FILE_PROTOCOL** root) {
+EFI_STATUS OpenRootDir(EFI_HANDLE image_handle, EFI_FILE_PROTOCOL** root) {
     EFI_LOADED_IMAGE_PROTOCOL*  loaded_image;
     EFI_SIMPLE_FILE_SYSTEM_PROTOCOL* fs;
 
@@ -93,7 +94,7 @@ EFI_STATUS OpenRootDir(EFI_HANDLE image_handle, EDI_FILE_PROTOCOL** root) {
         image_handle,
         &gEfiLoadedImageProtocolGuid,
         (VOID**)&loaded_image,
-        image_handler,
+        image_handle,
         NULL,
         EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL
     );
@@ -117,12 +118,21 @@ EFI_STATUS EFIAPI UefiMain(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE* system_tab
 
     CHAR8 memmap_buf[4096 * 4];
     struct MemoryMap memoryMap = {sizeof(memmap_buf), memmap_buf, 0, 0, 0, 0};
-    GetMemoryMap(&memmap);
+    GetMemoryMap(&memoryMap);
 
     EFI_FILE_PROTOCOL* root_dir;
     OpenRootDir(image_handle, &root_dir);
 
     EFI_FILE_PROTOCOL* memmap_file;
+    root_dir->Open (
+      root_dir, &memmap_file, L"\\memmap",
+      EFI_FILE_MODE_READ | EFI_FILE_MODE_WRITE | EFI_FILE_MODE_CREATE, 0
+    );
+
+    SaveMemoryMap(&memoryMap, memmap_file);
+    memmap_file->Close(memmap_file);
+
+    Print(L"All done\n");
 
     while (1);
     return EFI_SUCCESS;
